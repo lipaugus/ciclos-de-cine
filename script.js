@@ -1,6 +1,7 @@
 let moviesData = [];
 let corrientesMap = {};
 const tmdbCache = new Map(); // Cache local en memoria para no repetir peticiones
+let googleSheetsRequestQueue = Promise.resolve();
 
 // DOM
 const tbody = document.getElementById('movies-tbody');
@@ -21,23 +22,91 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
 });
 
-async function fetchCSV(sheet) {
-  const response = await fetch(`/api/sheets?sheet=${encodeURIComponent(sheet)}`);
-  if (!response.ok) {
-    throw new Error(`No se pudo cargar la hoja "${sheet}" (HTTP ${response.status}).`);
-  }
+function fetchCSV(sheet) {
+  const request = googleSheetsRequestQueue.then(() => fetchGoogleSheet(sheet));
+  googleSheetsRequestQueue = request.catch(() => {});
+  return request;
+}
 
-  const csv = await response.text();
-  const results = Papa.parse(csv, {
-    header: true,
-    skipEmptyLines: true
+function fetchGoogleSheet(sheet) {
+  const spreadsheetId = '1QXjX7o41PRM4mGq0IqWW0J2evxDioc7x8i9Us-kDZ0M';
+  const url = new URL(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq`);
+  url.searchParams.set('tqx', 'out:json');
+  url.searchParams.set('sheet', sheet);
+
+  return new Promise((resolve, reject) => {
+    const googleNamespace = window.google || (window.google = {});
+    const visualization = googleNamespace.visualization || (googleNamespace.visualization = {});
+    const query = visualization.Query || (visualization.Query = {});
+    const previousHandler = query.setResponse;
+    const script = document.createElement('script');
+    let timeout;
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      script.remove();
+      if (query.setResponse === handleResponse) {
+        if (previousHandler) {
+          query.setResponse = previousHandler;
+        } else {
+          delete query.setResponse;
+        }
+      }
+    };
+
+    const handleResponse = (response) => {
+      cleanup();
+
+      if (response.status !== 'ok') {
+        const message = response.errors?.[0]?.message || `Google Sheets no pudo cargar la hoja "${sheet}".`;
+        reject(new Error(message));
+        return;
+      }
+
+      try {
+        resolve(parseGoogleSheet(response.table));
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    query.setResponse = handleResponse;
+    script.onerror = () => {
+      cleanup();
+      reject(new Error(`No se pudo conectar con Google Sheets para cargar "${sheet}".`));
+    };
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Google Sheets tardó demasiado en responder para la hoja "${sheet}".`));
+    }, 15000);
+    script.src = url.toString();
+    document.head.appendChild(script);
   });
+}
 
-  if (results.errors.length > 0) {
-    throw new Error(`No se pudo interpretar la hoja "${sheet}": ${results.errors[0].message}`);
+function parseGoogleSheet(table) {
+  const columns = table.cols.map(column => column.label.trim());
+  let rows = table.rows;
+
+  if (!columns.some(Boolean)) {
+    const headerRow = rows.shift();
+    if (!headerRow) {
+      throw new Error('La hoja de Google Sheets está vacía.');
+    }
+    headerRow.c.forEach((cell, index) => {
+      columns[index] = cell?.v == null ? '' : String(cell.v).trim();
+    });
   }
 
-  return results.data;
+  if (!columns.some(Boolean)) {
+    throw new Error('No se encontraron encabezados válidos en Google Sheets.');
+  }
+
+  return rows.map(row => Object.fromEntries(
+    columns
+      .map((column, index) => [column, row.c[index]?.v == null ? '' : String(row.c[index].v)])
+      .filter(([column]) => column)
+  ));
 }
 
 // Obtener datos de TMDB mediante nuestra API serverless de Vercel
@@ -88,7 +157,7 @@ async function loadAllData() {
     renderTable(moviesData);
   } catch (err) {
     console.error("Error al cargar datos desde Google Sheets:", err);
-    resultsCount.textContent = "Error al cargar la base de datos.";
+    resultsCount.textContent = `Error al cargar la base de datos: ${err.message}`;
   }
 }
 
