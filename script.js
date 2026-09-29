@@ -1,6 +1,3 @@
-const SHEET_TABLA_URL = 'https://docs.google.com/spreadsheets/d/1QXjX7o41PRM4mGq0IqWW0J2evxDioc7x8i9Us-kDZ0M/gviz/tq?tqx=out:csv&sheet=tabla';
-const SHEET_CORRIENTES_URL = 'https://docs.google.com/spreadsheets/d/1QXjX7o41PRM4mGq0IqWW0J2evxDioc7x8i9Us-kDZ0M/gviz/tq?tqx=out:csv&sheet=corrientes';
-
 let moviesData = [];
 let corrientesMap = {};
 const tmdbCache = new Map(); // Cache local en memoria para no repetir peticiones
@@ -24,16 +21,23 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
 });
 
-function fetchCSV(url) {
-  return new Promise((resolve, reject) => {
-    Papa.parse(url, {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => resolve(results.data),
-      error: (err) => reject(err)
-    });
+async function fetchCSV(sheet) {
+  const response = await fetch(`/api/sheets?sheet=${encodeURIComponent(sheet)}`);
+  if (!response.ok) {
+    throw new Error(`No se pudo cargar la hoja "${sheet}" (HTTP ${response.status}).`);
+  }
+
+  const csv = await response.text();
+  const results = Papa.parse(csv, {
+    header: true,
+    skipEmptyLines: true
   });
+
+  if (results.errors.length > 0) {
+    throw new Error(`No se pudo interpretar la hoja "${sheet}": ${results.errors[0].message}`);
+  }
+
+  return results.data;
 }
 
 // Obtener datos de TMDB mediante nuestra API serverless de Vercel
@@ -56,8 +60,8 @@ async function fetchTMDBData(tmdbID) {
 async function loadAllData() {
   try {
     const [tablaRows, corrientesRows] = await Promise.all([
-      fetchCSV(SHEET_TABLA_URL),
-      fetchCSV(SHEET_CORRIENTES_URL)
+      fetchCSV('tabla'),
+      fetchCSV('corrientes')
     ]);
 
     corrientesRows.forEach(row => {
