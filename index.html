@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Colección Cinematográfica</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Lato:ital,wght@0,100;0,300;0,400;0,700;0,900;1,100;1,300;1,400;1,700;1,900&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- PapaParse para leer CSV de Google Sheets -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+
+  <header class="header">
+    <h1 class="cormorant-title">Catálogo Cinematográfico</h1>
+    <p class="subtitle">Archivo de películas, ciclos y corrientes cinematográficas</p>
+  </header>
+
+  <main class="container">
+    <!-- Panel de Filtros -->
+    <section class="filters-panel">
+      <div class="filter-group">
+        <label for="search-input">Buscar</label>
+        <input type="text" id="search-input" placeholder="Título o director..." />
+      </div>
+
+      <div class="filter-group">
+        <label for="filter-ciclo">Ciclo</label>
+        <select id="filter-ciclo">
+          <option value="">Todos los ciclos</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="filter-corriente">Corriente</label>
+        <select id="filter-corriente">
+          <option value="">Todas las corrientes</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="filter-duracion">Duración máxima: <span id="duracion-val">Todas</span></label>
+        <input type="range" id="filter-duracion" min="0" max="300" step="5" value="300" />
+      </div>
+
+      <button id="reset-filters" class="btn-secondary">Limpiar filtros</button>
+    </section>
+
+    <!-- Contador de resultados -->
+    <div class="results-count" id="results-count">Cargando películas...</div>
+
+    <!-- Tabla Elegante -->
+    <div class="table-wrapper">
+      <table class="movie-table">
+        <thead>
+          <tr>
+            <th>Póster</th>
+            <th>Título</th>
+            <th>Director</th>
+            <th>Año</th>
+            <th>Duración</th>
+            <th>Ciclos</th>
+            <th>Corrientes</th>
+          </tr>
+        </thead>
+        <tbody id="movies-tbody">
+          <!-- Las filas se cargarán dinámicamente desde script.js -->
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Modal para ampliar la película -->
+  <div id="movie-modal" class="modal">
+    <div class="modal-content">
+      <span class="close-modal">&times;</span>
+      <div class="modal-body">
+        <img id="modal-poster" src="" alt="Póster" />
+        <div class="modal-info">
+          <h2 id="modal-title" class="cormorant-title"></h2>
+          <p class="modal-meta"><strong id="modal-director"></strong> — <span id="modal-year"></span> (<span id="modal-duration"></span> min)</p>
+          <hr class="divider" />
+          <div class="modal-tags">
+            <p><strong>Ciclos:</strong> <span id="modal-ciclos"></span></p>
+            <div style="margin-top: 1rem;">
+              <strong>Corrientes Cinematográficas:</strong>
+              <div id="modal-corrientes-container" class="corrientes-details-wrapper">
+                <!-- Se generan dinámicamente las tarjetas con años y descripción -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
