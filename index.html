@@ -70,7 +70,7 @@
           </tr>
         </thead>
         <tbody id="movies-tbody">
-          <!-- Las filas se cargarán dinámicamente desde script.js -->
+          <!-- Carga dinámica -->
         </tbody>
       </table>
     </div>
@@ -85,14 +85,16 @@
         <div class="modal-info">
           <h2 id="modal-title" class="cormorant-title"></h2>
           <p class="modal-meta"><strong id="modal-director"></strong> — <span id="modal-year"></span> (<span id="modal-duration"></span> min)</p>
+          
+          <!-- Sinopsis de TMDB -->
+          <p id="modal-overview" class="modal-overview">Cargando sinopsis...</p>
+          
           <hr class="divider" />
           <div class="modal-tags">
             <p><strong>Ciclos:</strong> <span id="modal-ciclos"></span></p>
             <div style="margin-top: 1rem;">
               <strong>Corrientes Cinematográficas:</strong>
-              <div id="modal-corrientes-container" class="corrientes-details-wrapper">
-                <!-- Se generan dinámicamente las tarjetas con años y descripción -->
-              </div>
+              <div id="modal-corrientes-container" class="corrientes-details-wrapper"></div>
             </div>
           </div>
         </div>

@@ -1,11 +1,11 @@
-// URLs para exportar las pestañas "tabla" y "corrientes" en formato CSV
 const SHEET_TABLA_URL = 'https://docs.google.com/spreadsheets/d/1QXjX7o41PRM4mGq0IqWW0J2evxDioc7x8i9Us-kDZ0M/gviz/tq?tqx=out:csv&sheet=tabla';
 const SHEET_CORRIENTES_URL = 'https://docs.google.com/spreadsheets/d/1QXjX7o41PRM4mGq0IqWW0J2evxDioc7x8i9Us-kDZ0M/gviz/tq?tqx=out:csv&sheet=corrientes';
 
 let moviesData = [];
-let corrientesMap = {}; // Mapa para buscar info de corrientes por nombre
+let corrientesMap = {};
+const tmdbCache = new Map(); // Cache local en memoria para no repetir peticiones
 
-// Elementos DOM
+// DOM
 const tbody = document.getElementById('movies-tbody');
 const searchInput = document.getElementById('search-input');
 const filterCiclo = document.getElementById('filter-ciclo');
@@ -15,7 +15,7 @@ const duracionVal = document.getElementById('duracion-val');
 const resetBtn = document.getElementById('reset-filters');
 const resultsCount = document.getElementById('results-count');
 
-// Modal Elements
+// Modal
 const modal = document.getElementById('movie-modal');
 const closeModal = document.querySelector('.close-modal');
 
@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
 });
 
-// Helper para envolver PapaParse en una Promesa
 function fetchCSV(url) {
   return new Promise((resolve, reject) => {
     Papa.parse(url, {
@@ -37,7 +36,23 @@ function fetchCSV(url) {
   });
 }
 
-// 1. Cargar ambas hojas en paralelo
+// Obtener datos de TMDB mediante nuestra API serverless de Vercel
+async function fetchTMDBData(tmdbID) {
+  if (!tmdbID) return null;
+  if (tmdbCache.has(tmdbID)) return tmdbCache.get(tmdbID);
+
+  try {
+    const res = await fetch(`/api/tmdb?id=${encodeURIComponent(tmdbID)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    tmdbCache.set(tmdbID, data);
+    return data;
+  } catch (e) {
+    console.error(`Error al traer datos de TMDB para ID ${tmdbID}:`, e);
+    return null;
+  }
+}
+
 async function loadAllData() {
   try {
     const [tablaRows, corrientesRows] = await Promise.all([
@@ -45,7 +60,6 @@ async function loadAllData() {
       fetchCSV(SHEET_CORRIENTES_URL)
     ]);
 
-    // Mapear información de las corrientes
     corrientesRows.forEach(row => {
       const nombreCorriente = row['corriente'] ? row['corriente'].trim() : '';
       if (nombreCorriente) {
@@ -56,7 +70,6 @@ async function loadAllData() {
       }
     });
 
-    // Mapear películas
     moviesData = tablaRows.map(row => ({
       ciclos: parseList(row['ciclos']),
       corrientes: parseList(row['corrientes']),
@@ -64,7 +77,7 @@ async function loadAllData() {
       director: row['director'] || 'Desconocido',
       anio: parseInt(row['año']) || '-',
       duracion: parseInt(row['duracion']) || 0,
-      poster: row['URLposter'] || ''
+      tmdbID: row['tmdbID'] ? row['tmdbID'].trim() : ''
     }));
 
     populateFilterSelects();
@@ -75,13 +88,11 @@ async function loadAllData() {
   }
 }
 
-// Auxiliar para separar texto delimitado por ";"
 function parseList(field) {
   if (!field) return [];
   return field.split(';').map(item => item.trim()).filter(Boolean);
 }
 
-// 2. Poblar opciones de selectores
 function populateFilterSelects() {
   const ciclosSet = new Set();
   const corrientesSet = new Set();
@@ -114,7 +125,6 @@ function populateFilterSelects() {
   });
 }
 
-// 3. Renderizar la Tabla
 function renderTable(data) {
   tbody.innerHTML = '';
   resultsCount.textContent = `Mostrando ${data.length} de ${moviesData.length} películas`;
@@ -130,12 +140,12 @@ function renderTable(data) {
     const ciclosTags = movie.ciclos.map(c => `<span class="tag">${c}</span>`).join(' ');
     const corrientesTags = movie.corrientes.map(c => `<span class="tag tag-corriente">${c}</span>`).join(' ');
 
-    const posterImg = movie.poster 
-      ? `<img src="${movie.poster}" alt="${movie.titulo}" class="poster-thumb" loading="lazy" />` 
-      : `<div class="poster-thumb" style="display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:#666;">Sin foto</div>`;
+    const imgId = `poster-${movie.tmdbID || Math.random().toString(36).substr(2, 9)}`;
 
     tr.innerHTML = `
-      <td>${posterImg}</td>
+      <td>
+        <div id="${imgId}" class="poster-thumb" style="display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:#666;">...</div>
+      </td>
       <td class="movie-title-cell">${movie.titulo}</td>
       <td>${movie.director}</td>
       <td>${movie.anio}</td>
@@ -144,12 +154,23 @@ function renderTable(data) {
       <td>${corrientesTags || '-'}</td>
     `;
 
+    // Cargar póster de TMDB para la miniatura
+    if (movie.tmdbID) {
+      fetchTMDBData(movie.tmdbID).then(tmdb => {
+        const container = document.getElementById(imgId);
+        if (container && tmdb && tmdb.poster_path) {
+          container.outerHTML = `<img src="https://image.tmdb.org/t/p/w200${tmdb.poster_path}" alt="${movie.titulo}" class="poster-thumb" loading="lazy" />`;
+        } else if (container) {
+          container.textContent = 'Sin foto';
+        }
+      });
+    }
+
     tr.addEventListener('click', () => openModal(movie));
     tbody.appendChild(tr);
   });
 }
 
-// 4. Lógica de Filtrado
 function applyFilters() {
   const query = searchInput.value.toLowerCase();
   const selectedCiclo = filterCiclo.value;
@@ -195,17 +216,22 @@ function setupEventListeners() {
   });
 }
 
-// 5. Modal con detalle ampliado e información de la Corriente Cinematográfica
-function openModal(movie) {
+// Abre el modal y consulta la sinopsis + información ampliada de TMDB
+async function openModal(movie) {
   document.getElementById('modal-title').textContent = movie.titulo;
   document.getElementById('modal-director').textContent = movie.director;
   document.getElementById('modal-year').textContent = movie.anio;
   document.getElementById('modal-duration').textContent = movie.duracion || 'N/A';
-  document.getElementById('modal-poster').src = movie.poster || 'https://via.placeholder.com/160x240?text=Sin+Poster';
+  
+  const overviewEl = document.getElementById('modal-overview');
+  const posterEl = document.getElementById('modal-poster');
+
+  overviewEl.textContent = 'Cargando sinopsis desde TMDB...';
+  posterEl.src = 'https://via.placeholder.com/170x250?text=Cargando...';
 
   document.getElementById('modal-ciclos').innerHTML = movie.ciclos.map(c => `<span class="tag">${c}</span>`).join(' ') || 'Ninguno';
 
-  // Generar fichas detalladas para cada corriente de la película
+  // Mostrar información de corrientes
   const corrientesContainer = document.getElementById('modal-corrientes-container');
   corrientesContainer.innerHTML = '';
 
@@ -233,8 +259,24 @@ function openModal(movie) {
       corrientesContainer.appendChild(card);
     });
   } else {
-    corrientesContainer.innerHTML = '<span class="text-muted" style="font-size:0.85rem; color:#888;">Sin corriente asignada.</span>';
+    corrientesContainer.innerHTML = '<span style="font-size:0.85rem; color:#888;">Sin corriente asignada.</span>';
   }
 
   modal.style.display = 'flex';
+
+  // Obtener datos de TMDB (Sinopsis y Póster HD)
+  if (movie.tmdbID) {
+    const tmdb = await fetchTMDBData(movie.tmdbID);
+    if (tmdb) {
+      overviewEl.textContent = tmdb.overview || 'Sinopsis no disponible en TMDB.';
+      if (tmdb.poster_path) {
+        posterEl.src = `https://image.tmdb.org/t/p/w500${tmdb.poster_path}`;
+      }
+    } else {
+      overviewEl.textContent = 'No se pudo cargar la información desde TMDB.';
+    }
+  } else {
+    overviewEl.textContent = 'Película sin ID de TMDB configurado.';
+    posterEl.src = 'https://via.placeholder.com/170x250?text=Sin+TMDB+ID';
+  }
 }

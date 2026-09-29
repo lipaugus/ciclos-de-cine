@@ -193,7 +193,6 @@ select:focus {
   color: #e2c976;
 }
 
-/* Title Styling in Table */
 .movie-title-cell {
   font-family: var(--font-serif);
   font-size: 1.2rem;
@@ -220,7 +219,9 @@ select:focus {
   background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   width: 90%;
-  max-width: 650px;
+  max-width: 700px;
+  max-height: 90vh;
+  overflow-y: auto;
   border-radius: 8px;
   position: relative;
   padding: 2rem;
@@ -247,7 +248,7 @@ select:focus {
 }
 
 #modal-poster {
-  width: 160px;
+  width: 170px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
 }
@@ -258,13 +259,22 @@ select:focus {
 
 #modal-title {
   font-size: 2rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.3rem;
   color: #fff;
 }
 
 .modal-meta {
   color: var(--text-muted);
   font-size: 0.95rem;
+  margin-bottom: 0.8rem;
+}
+
+.modal-overview {
+  font-size: 0.92rem;
+  color: #d1d1d6;
+  line-height: 1.55;
+  margin-top: 0.5rem;
+  font-style: normal;
 }
 
 .divider {
@@ -279,7 +289,7 @@ select:focus {
   font-size: 0.9rem;
 }
 
-/* Tarjetas informativas de Corrientes dentro del Modal */
+/* Tarjetas de Corrientes */
 .corrientes-details-wrapper {
   margin-top: 0.5rem;
   display: flex;
@@ -319,8 +329,6 @@ select:focus {
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
   font-weight: 400;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
 }
 
 .corriente-card-desc {
