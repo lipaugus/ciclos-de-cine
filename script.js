@@ -12,10 +12,17 @@ const filterDuracion = document.getElementById('filter-duracion');
 const duracionVal = document.getElementById('duracion-val');
 const resetBtn = document.getElementById('reset-filters');
 const resultsCount = document.getElementById('results-count');
+const corrienteTooltip = document.getElementById('corriente-tooltip');
+const tooltipTitle = document.getElementById('corriente-tooltip-title');
+const tooltipYears = document.getElementById('corriente-tooltip-years');
+const tooltipDescription = document.getElementById('corriente-tooltip-description');
 
 // Modal
 const modal = document.getElementById('movie-modal');
 const closeModal = document.querySelector('.close-modal');
+let activeCorrienteTrigger = null;
+let corrienteTooltipPinned = false;
+let corrienteTooltipTimer;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadAllData();
@@ -134,7 +141,7 @@ async function loadAllData() {
     ]);
 
     corrientesRows.forEach(row => {
-      const nombreCorriente = row['corriente'] ? row['corriente'].trim() : '';
+      const nombreCorriente = (row['corrientes'] || row['corriente'] || '').trim();
       if (nombreCorriente) {
         corrientesMap[nombreCorriente] = {
           anios: row['años'] || row['anios'] || '',
@@ -211,7 +218,8 @@ function renderTable(data) {
     const tr = document.createElement('tr');
 
     const ciclosTags = movie.ciclos.map(c => `<span class="tag">${c}</span>`).join(' ');
-    const corrientesTags = movie.corrientes.map(c => `<span class="tag tag-corriente">${c}</span>`).join(' ');
+    const corrientesCell = document.createElement('td');
+    corrientesCell.append(...movie.corrientes.map(createCorrienteTrigger));
 
     const imgId = `poster-${movie.tmdbID || Math.random().toString(36).substr(2, 9)}`;
 
@@ -224,8 +232,12 @@ function renderTable(data) {
       <td>${movie.anio}</td>
       <td>${movie.duracion ? movie.duracion + ' min' : '-'}</td>
       <td>${ciclosTags || '-'}</td>
-      <td>${corrientesTags || '-'}</td>
     `;
+    if (movie.corrientes.length > 0) {
+      tr.appendChild(corrientesCell);
+    } else {
+      tr.insertAdjacentHTML('beforeend', '<td>-</td>');
+    }
 
     // Cargar póster de TMDB para la miniatura
     if (movie.tmdbID) {
@@ -242,6 +254,96 @@ function renderTable(data) {
     tr.addEventListener('click', () => openModal(movie));
     tbody.appendChild(tr);
   });
+}
+
+function createCorrienteTrigger(nombre) {
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'tag tag-corriente corriente-trigger';
+  trigger.textContent = nombre;
+  trigger.setAttribute('aria-describedby', 'corriente-tooltip');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  trigger.addEventListener('pointerenter', event => {
+    if (event.pointerType !== 'touch') {
+      showCorrienteTooltip(trigger, nombre);
+    }
+  });
+  trigger.addEventListener('pointerleave', scheduleCorrienteTooltipClose);
+  trigger.addEventListener('focus', () => showCorrienteTooltip(trigger, nombre));
+  trigger.addEventListener('blur', scheduleCorrienteTooltipClose);
+  trigger.addEventListener('click', event => {
+    event.stopPropagation();
+    clearTimeout(corrienteTooltipTimer);
+
+    if (activeCorrienteTrigger === trigger && !corrienteTooltipPinned) {
+      corrienteTooltipPinned = true;
+      return;
+    }
+    if (activeCorrienteTrigger === trigger && corrienteTooltipPinned) {
+      hideCorrienteTooltip();
+      return;
+    }
+    showCorrienteTooltip(trigger, nombre, true);
+  });
+
+  return trigger;
+}
+
+function showCorrienteTooltip(trigger, nombre, pinned = false) {
+  clearTimeout(corrienteTooltipTimer);
+
+  if (activeCorrienteTrigger && activeCorrienteTrigger !== trigger) {
+    activeCorrienteTrigger.setAttribute('aria-expanded', 'false');
+  }
+
+  const info = corrientesMap[nombre];
+  tooltipTitle.textContent = nombre;
+  tooltipYears.textContent = info?.anios || '';
+  tooltipYears.hidden = !info?.anios;
+  tooltipDescription.textContent = info?.descripcion || 'No hay información adicional disponible.';
+  activeCorrienteTrigger = trigger;
+  corrienteTooltipPinned = pinned;
+  trigger.setAttribute('aria-expanded', 'true');
+  corrienteTooltip.setAttribute('aria-hidden', 'false');
+  corrienteTooltip.classList.add('is-visible');
+  positionCorrienteTooltip(trigger);
+}
+
+function positionCorrienteTooltip(trigger) {
+  const triggerRect = trigger.getBoundingClientRect();
+  const tooltipRect = corrienteTooltip.getBoundingClientRect();
+  const margin = 12;
+  const left = Math.min(
+    Math.max(margin, triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2),
+    window.innerWidth - tooltipRect.width - margin
+  );
+  const top = triggerRect.top >= tooltipRect.height + margin
+    ? triggerRect.top - tooltipRect.height - margin
+    : Math.min(triggerRect.bottom + margin, window.innerHeight - tooltipRect.height - margin);
+
+  corrienteTooltip.style.left = `${left}px`;
+  corrienteTooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+function scheduleCorrienteTooltipClose() {
+  clearTimeout(corrienteTooltipTimer);
+  corrienteTooltipTimer = setTimeout(() => {
+    if (!corrienteTooltipPinned) {
+      hideCorrienteTooltip();
+    }
+  }, 150);
+}
+
+function hideCorrienteTooltip() {
+  clearTimeout(corrienteTooltipTimer);
+  if (activeCorrienteTrigger) {
+    activeCorrienteTrigger.setAttribute('aria-expanded', 'false');
+  }
+  activeCorrienteTrigger = null;
+  corrienteTooltipPinned = false;
+  corrienteTooltip.classList.remove('is-visible');
+  corrienteTooltip.setAttribute('aria-hidden', 'true');
 }
 
 function applyFilters() {
@@ -284,7 +386,31 @@ function setupEventListeners() {
   });
 
   closeModal.addEventListener('click', () => modal.style.display = 'none');
+  corrienteTooltip.addEventListener('pointerenter', () => clearTimeout(corrienteTooltipTimer));
+  corrienteTooltip.addEventListener('pointerleave', scheduleCorrienteTooltipClose);
+  window.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && activeCorrienteTrigger) {
+      hideCorrienteTooltip();
+    }
+  });
+  window.addEventListener('resize', () => {
+    if (activeCorrienteTrigger) {
+      positionCorrienteTooltip(activeCorrienteTrigger);
+    }
+  });
+  window.addEventListener('scroll', () => {
+    if (activeCorrienteTrigger) {
+      if (corrienteTooltipPinned) {
+        positionCorrienteTooltip(activeCorrienteTrigger);
+      } else {
+        hideCorrienteTooltip();
+      }
+    }
+  }, true);
   window.addEventListener('click', (e) => {
+    if (activeCorrienteTrigger && !corrienteTooltip.contains(e.target) && !activeCorrienteTrigger.contains(e.target)) {
+      hideCorrienteTooltip();
+    }
     if (e.target === modal) modal.style.display = 'none';
   });
 }
@@ -314,21 +440,28 @@ async function openModal(movie) {
       const card = document.createElement('div');
       card.className = 'corriente-card';
 
-      if (info) {
-        card.innerHTML = `
-          <div class="corriente-card-header">
-            <span class="corriente-card-title">${corrienteNombre}</span>
-            ${info.anios ? `<span class="corriente-card-years">${info.anios}</span>` : ''}
-          </div>
-          ${info.descripcion ? `<p class="corriente-card-desc">${info.descripcion}</p>` : ''}
-        `;
-      } else {
-        card.innerHTML = `
-          <div class="corriente-card-header">
-            <span class="corriente-card-title">${corrienteNombre}</span>
-          </div>
-        `;
+      const cardHeader = document.createElement('div');
+      cardHeader.className = 'corriente-card-header';
+      const title = document.createElement('span');
+      title.className = 'corriente-card-title';
+      title.textContent = corrienteNombre;
+      cardHeader.appendChild(title);
+
+      if (info?.anios) {
+        const years = document.createElement('span');
+        years.className = 'corriente-card-years';
+        years.textContent = info.anios;
+        cardHeader.appendChild(years);
       }
+      card.appendChild(cardHeader);
+
+      if (info?.descripcion) {
+        const description = document.createElement('p');
+        description.className = 'corriente-card-desc';
+        description.textContent = info.descripcion;
+        card.appendChild(description);
+      }
+
       corrientesContainer.appendChild(card);
     });
   } else {
