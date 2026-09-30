@@ -47,6 +47,29 @@
         <input type="range" id="filter-duracion" min="0" max="300" step="5" value="300" />
       </div>
 
+      <div class="filter-group">
+        <label for="hide-watched">Películas vistas</label>
+        <label class="toggle-label">
+          <input type="checkbox" id="hide-watched" checked />
+          <span>Ocultar películas vistas</span>
+        </label>
+      </div>
+
+      <div class="filter-group genre-filter-group">
+        <span class="filter-label">Géneros</span>
+        <div class="genre-filter" id="genre-filter">
+          <button id="genre-filter-toggle" class="genre-filter-toggle" type="button" aria-expanded="false" aria-controls="genre-options">
+            Todos los géneros
+          </button>
+          <div id="genre-options" class="genre-options" hidden>
+            <p class="genre-filter-help">Muestra cualquiera de los géneros incluidos. Clic: incluir · otro clic: excluir · otro clic: limpiar.</p>
+            <div id="genre-options-list" class="genre-options-list" role="group" aria-label="Filtrar por género">
+              <span class="genre-options-status">Cargando géneros...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <button id="reset-filters" class="btn-secondary">Limpiar filtros</button>
     </section>
 
@@ -58,13 +81,13 @@
       <table class="movie-table">
         <thead>
           <tr>
-            <th>Póster</th>
-            <th>Título</th>
-            <th>Director</th>
-            <th>Año</th>
-            <th>Duración</th>
-            <th>Ciclos</th>
-            <th>Corrientes</th>
+            <th data-sort-key="poster"><button class="sort-button" type="button">Póster</button></th>
+            <th data-sort-key="titulo"><button class="sort-button" type="button">Título</button></th>
+            <th data-sort-key="director"><button class="sort-button" type="button">Director</button></th>
+            <th data-sort-key="anio"><button class="sort-button" type="button">Año</button></th>
+            <th data-sort-key="duracion"><button class="sort-button" type="button">Duración</button></th>
+            <th data-sort-key="ciclos"><button class="sort-button" type="button">Ciclos</button></th>
+            <th data-sort-key="corrientes"><button class="sort-button" type="button">Corrientes</button></th>
           </tr>
         </thead>
         <tbody id="movies-tbody">
@@ -82,10 +105,15 @@
         <img id="modal-poster" src="" alt="Póster" />
         <div class="modal-info">
           <h2 id="modal-title" class="cormorant-title"></h2>
+          <p class="modal-original-title"><strong>Título original:</strong> <span id="modal-original-title">Cargando...</span></p>
           <p class="modal-meta"><strong id="modal-director"></strong> — <span id="modal-year"></span> (<span id="modal-duration"></span> min)</p>
           
           <!-- Sinopsis de TMDB -->
           <p id="modal-overview" class="modal-overview">Cargando sinopsis...</p>
+          <div class="modal-genres-section">
+            <strong>Géneros:</strong>
+            <div id="modal-genres" class="modal-genres">Cargando géneros...</div>
+          </div>
           
           <hr class="divider" />
           <div class="modal-tags">

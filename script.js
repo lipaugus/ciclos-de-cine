@@ -1,7 +1,13 @@
 let moviesData = [];
 let corrientesMap = {};
-const tmdbCache = new Map(); // Cache local en memoria para no repetir peticiones
+const tmdbCache = new Map();
+const tmdbQueue = [];
+const TMDB_CONCURRENCY = 6;
 let googleSheetsRequestQueue = Promise.resolve();
+let activeTmdbRequests = 0;
+let genreStates = new Map();
+let sortState = { key: null, direction: null };
+let activeModalRequestId = 0;
 
 // DOM
 const tbody = document.getElementById('movies-tbody');
@@ -12,6 +18,11 @@ const filterDuracion = document.getElementById('filter-duracion');
 const duracionVal = document.getElementById('duracion-val');
 const resetBtn = document.getElementById('reset-filters');
 const resultsCount = document.getElementById('results-count');
+const hideWatched = document.getElementById('hide-watched');
+const genreFilter = document.getElementById('genre-filter');
+const genreFilterToggle = document.getElementById('genre-filter-toggle');
+const genreOptions = document.getElementById('genre-options');
+const genreOptionsList = document.getElementById('genre-options-list');
 const corrienteTooltip = document.getElementById('corriente-tooltip');
 const tooltipTitle = document.getElementById('corriente-tooltip-title');
 const tooltipYears = document.getElementById('corriente-tooltip-years');
@@ -121,15 +132,35 @@ async function fetchTMDBData(tmdbID) {
   if (!tmdbID) return null;
   if (tmdbCache.has(tmdbID)) return tmdbCache.get(tmdbID);
 
-  try {
-    const res = await fetch(`/api/tmdb?id=${encodeURIComponent(tmdbID)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    tmdbCache.set(tmdbID, data);
-    return data;
-  } catch (e) {
-    console.error(`Error al traer datos de TMDB para ID ${tmdbID}:`, e);
-    return null;
+  const request = new Promise(resolve => {
+    tmdbQueue.push({ tmdbID, resolve });
+    processTmdbQueue();
+  });
+  tmdbCache.set(tmdbID, request);
+  return request;
+}
+
+function processTmdbQueue() {
+  while (activeTmdbRequests < TMDB_CONCURRENCY && tmdbQueue.length > 0) {
+    const { tmdbID, resolve } = tmdbQueue.shift();
+    activeTmdbRequests++;
+    fetch(`/api/tmdb?id=${encodeURIComponent(tmdbID)}`)
+      .then(response => {
+        if (!response.ok) {
+          console.error(`TMDB respondió con HTTP ${response.status} para la película ${tmdbID}.`);
+          return null;
+        }
+        return response.json();
+      })
+      .catch(error => {
+        console.error(`Error al traer datos de TMDB para ID ${tmdbID}:`, error);
+        return null;
+      })
+      .then(resolve)
+      .finally(() => {
+        activeTmdbRequests--;
+        processTmdbQueue();
+      });
   }
 }
 
@@ -157,11 +188,20 @@ async function loadAllData() {
       director: row['director'] || 'Desconocido',
       anio: parseInt(row['año']) || '-',
       duracion: parseInt(row['duracion']) || 0,
-      tmdbID: row['tmdbID'] ? row['tmdbID'].trim() : ''
+      tmdbID: row['tmdbID'] ? row['tmdbID'].trim() : '',
+      watched: Boolean(row['watched'] && row['watched'].trim()),
+      genres: [],
+      originalTitle: '',
+      orderIndex: 0
     }));
+
+    moviesData.forEach((movie, index) => {
+      movie.orderIndex = index;
+    });
 
     populateFilterSelects();
     renderTable(moviesData);
+    loadMovieMetadata();
   } catch (err) {
     console.error("Error al cargar datos desde Google Sheets:", err);
     resultsCount.textContent = `Error al cargar la base de datos: ${err.message}`;
@@ -203,6 +243,105 @@ function populateFilterSelects() {
     opt.textContent = corriente;
     filterCorriente.appendChild(opt);
   });
+
+  loadGenreOptions();
+}
+
+async function loadMovieMetadata() {
+  const results = await Promise.all(moviesData.map(async movie => {
+    const tmdb = await fetchTMDBData(movie.tmdbID);
+    if (!tmdb) return false;
+
+    movie.originalTitle = tmdb.original_title || '';
+    movie.genres = Array.isArray(tmdb.genres)
+      ? tmdb.genres.map(genre => genre.name).filter(Boolean)
+      : [];
+    return true;
+  }));
+
+  populateGenreOptions();
+  if (results.some(Boolean)) {
+    applyFilters();
+  } else {
+    genreOptionsList.innerHTML = '<span class="genre-options-status">No se pudieron cargar los géneros desde TMDB.</span>';
+  }
+}
+
+function populateGenreOptions() {
+  const genres = Array.from(new Set(moviesData.flatMap(movie => movie.genres))).sort((a, b) => a.localeCompare(b));
+  genreOptionsList.innerHTML = '';
+
+  if (genres.length === 0) {
+    genreOptionsList.innerHTML = '<span class="genre-options-status">No hay géneros disponibles.</span>';
+    updateGenreFilterLabel();
+    return;
+  }
+
+  genres.forEach(genre => {
+    const state = genreStates.get(genre) || 'default';
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'genre-option';
+    option.dataset.genre = genre;
+
+    const name = document.createElement('span');
+    name.textContent = genre;
+    const mark = document.createElement('span');
+    mark.className = 'genre-option-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    option.append(name, mark);
+    option.addEventListener('click', () => cycleGenreState(genre));
+    setGenreOptionState(option, state);
+    genreOptionsList.appendChild(option);
+  });
+  updateGenreFilterLabel();
+}
+
+function loadGenreOptions() {
+  genreOptionsList.innerHTML = '<span class="genre-options-status">Cargando géneros...</span>';
+}
+
+function cycleGenreState(genre) {
+  const nextState = {
+    default: 'include',
+    include: 'exclude',
+    exclude: 'default'
+  }[genreStates.get(genre) || 'default'];
+
+  if (nextState === 'default') {
+    genreStates.delete(genre);
+  } else {
+    genreStates.set(genre, nextState);
+  }
+
+  updateGenreOptionStates();
+  applyFilters();
+}
+
+function updateGenreOptionStates() {
+  genreOptionsList.querySelectorAll('.genre-option').forEach(option => {
+    setGenreOptionState(option, genreStates.get(option.dataset.genre) || 'default');
+  });
+  updateGenreFilterLabel();
+}
+
+function setGenreOptionState(option, state) {
+  option.dataset.state = state;
+  option.setAttribute('aria-pressed', String(state !== 'default'));
+  option.setAttribute('aria-label', `${option.dataset.genre}: ${
+    state === 'include' ? 'incluir' : state === 'exclude' ? 'excluir' : 'sin filtro'
+  }`);
+  option.querySelector('.genre-option-mark').textContent =
+    state === 'include' ? '✓' : state === 'exclude' ? '⊘' : '';
+}
+
+function updateGenreFilterLabel() {
+  const includes = Array.from(genreStates.values()).filter(state => state === 'include').length;
+  const excludes = Array.from(genreStates.values()).filter(state => state === 'exclude').length;
+  const total = includes + excludes;
+  genreFilterToggle.textContent = total === 0
+    ? 'Todos los géneros'
+    : `${total} género${total === 1 ? '' : 's'} seleccionado${total === 1 ? '' : 's'}`;
 }
 
 function renderTable(data) {
@@ -210,7 +349,7 @@ function renderTable(data) {
   resultsCount.textContent = `Mostrando ${data.length} de ${moviesData.length} películas`;
 
   if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 2rem; color: var(--text-muted);">No se encontraron películas.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-table-message">No se encontraron películas.</td></tr>`;
     return;
   }
 
@@ -351,6 +490,8 @@ function applyFilters() {
   const selectedCiclo = filterCiclo.value;
   const selectedCorriente = filterCorriente.value;
   const maxDur = parseInt(filterDuracion.value);
+  const includedGenres = Array.from(genreStates).filter(([, state]) => state === 'include').map(([genre]) => genre);
+  const excludedGenres = Array.from(genreStates).filter(([, state]) => state === 'exclude').map(([genre]) => genre);
 
   const filtered = moviesData.filter(movie => {
     const matchSearch = movie.titulo.toLowerCase().includes(query) || 
@@ -359,17 +500,94 @@ function applyFilters() {
     const matchCiclo = selectedCiclo === '' || movie.ciclos.includes(selectedCiclo);
     const matchCorriente = selectedCorriente === '' || movie.corrientes.includes(selectedCorriente);
     const matchDuracion = movie.duracion <= maxDur || movie.duracion === 0;
+    const matchWatched = !hideWatched.checked || !movie.watched;
+    const matchIncludedGenres = includedGenres.length === 0 || includedGenres.some(genre => movie.genres.includes(genre));
+    const matchExcludedGenres = !excludedGenres.some(genre => movie.genres.includes(genre));
 
-    return matchSearch && matchCiclo && matchCorriente && matchDuracion;
+    return matchSearch && matchCiclo && matchCorriente && matchDuracion
+      && matchWatched && matchIncludedGenres && matchExcludedGenres;
   });
 
-  renderTable(filtered);
+  renderTable(sortMovies(filtered));
+}
+
+function sortMovies(movies) {
+  if (!sortState.key || !sortState.direction) {
+    return [...movies].sort((a, b) => a.orderIndex - b.orderIndex);
+  }
+
+  const direction = sortState.direction === 'ascending' ? 1 : -1;
+  return [...movies].sort((a, b) => direction * compareMovies(a, b, sortState.key) || a.orderIndex - b.orderIndex);
+}
+
+function compareMovies(first, second, key) {
+  if (key === 'anio' || key === 'duracion') {
+    const firstValue = key === 'anio' ? first.anio : first.duracion;
+    const secondValue = key === 'anio' ? second.anio : second.duracion;
+    const firstNumber = typeof firstValue === 'number' ? firstValue : Number.NEGATIVE_INFINITY;
+    const secondNumber = typeof secondValue === 'number' ? secondValue : Number.NEGATIVE_INFINITY;
+    return firstNumber - secondNumber;
+  }
+
+  const firstValue = key === 'poster' ? first.tmdbID : first[key];
+  const secondValue = key === 'poster' ? second.tmdbID : second[key];
+  const firstText = Array.isArray(firstValue) ? firstValue.join(', ') : String(firstValue || '');
+  const secondText = Array.isArray(secondValue) ? secondValue.join(', ') : String(secondValue || '');
+  return firstText.localeCompare(secondText, 'es', { sensitivity: 'base', numeric: true });
+}
+
+function cycleSort(key) {
+  if (sortState.key !== key) {
+    sortState = { key, direction: 'ascending' };
+  } else if (sortState.direction === 'ascending') {
+    sortState.direction = 'descending';
+  } else if (sortState.direction === 'descending') {
+    sortState = { key: null, direction: null };
+  } else {
+    sortState.direction = 'ascending';
+  }
+
+  updateSortIndicators();
+  applyFilters();
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll('.movie-table thead th[data-sort-key]').forEach(header => {
+    const active = header.dataset.sortKey === sortState.key;
+    header.setAttribute('aria-sort', active ? sortState.direction : 'none');
+    const button = header.querySelector('.sort-button');
+    button.dataset.direction = active ? sortState.direction : 'none';
+  });
 }
 
 function setupEventListeners() {
   searchInput.addEventListener('input', applyFilters);
   filterCiclo.addEventListener('change', applyFilters);
   filterCorriente.addEventListener('change', applyFilters);
+  hideWatched.addEventListener('change', applyFilters);
+  document.querySelectorAll('.movie-table thead th[data-sort-key]').forEach(header => {
+    header.querySelector('.sort-button').addEventListener('click', () => cycleSort(header.dataset.sortKey));
+  });
+
+  genreFilterToggle.addEventListener('click', () => {
+    const isExpanded = genreFilterToggle.getAttribute('aria-expanded') === 'true';
+    genreFilterToggle.setAttribute('aria-expanded', String(!isExpanded));
+    genreOptions.hidden = isExpanded;
+  });
+
+  document.addEventListener('click', event => {
+    if (!genreFilter.contains(event.target)) {
+      genreOptions.hidden = true;
+      genreFilterToggle.setAttribute('aria-expanded', 'false');
+    }
+  });
+  genreFilter.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      genreOptions.hidden = true;
+      genreFilterToggle.setAttribute('aria-expanded', 'false');
+      genreFilterToggle.focus();
+    }
+  });
   
   filterDuracion.addEventListener('input', (e) => {
     duracionVal.textContent = `${e.target.value} min`;
@@ -382,6 +600,11 @@ function setupEventListeners() {
     filterCorriente.value = '';
     filterDuracion.value = filterDuracion.max;
     duracionVal.textContent = `${filterDuracion.max} min`;
+    hideWatched.checked = true;
+    genreStates.clear();
+    sortState = { key: null, direction: null };
+    updateGenreFilterLabel();
+    updateSortIndicators();
     applyFilters();
   });
 
@@ -417,10 +640,13 @@ function setupEventListeners() {
 
 // Abre el modal y consulta la sinopsis + información ampliada de TMDB
 async function openModal(movie) {
+  const requestId = ++activeModalRequestId;
   document.getElementById('modal-title').textContent = movie.titulo;
   document.getElementById('modal-director').textContent = movie.director;
   document.getElementById('modal-year').textContent = movie.anio;
   document.getElementById('modal-duration').textContent = movie.duracion || 'N/A';
+  document.getElementById('modal-original-title').textContent = 'Cargando...';
+  document.getElementById('modal-genres').textContent = 'Cargando géneros...';
   
   const overviewEl = document.getElementById('modal-overview');
   const posterEl = document.getElementById('modal-poster');
@@ -473,16 +699,41 @@ async function openModal(movie) {
   // Obtener datos de TMDB (Sinopsis y Póster HD)
   if (movie.tmdbID) {
     const tmdb = await fetchTMDBData(movie.tmdbID);
+    if (requestId !== activeModalRequestId) {
+      return;
+    }
     if (tmdb) {
       overviewEl.textContent = tmdb.overview || 'Sinopsis no disponible en TMDB.';
+      document.getElementById('modal-original-title').textContent = tmdb.original_title || movie.titulo;
+      renderModalGenres(tmdb.genres);
       if (tmdb.poster_path) {
         posterEl.src = `https://image.tmdb.org/t/p/w500${tmdb.poster_path}`;
       }
     } else {
       overviewEl.textContent = 'No se pudo cargar la información desde TMDB.';
+      document.getElementById('modal-original-title').textContent = 'No disponible';
+      document.getElementById('modal-genres').textContent = 'No disponibles';
     }
   } else {
     overviewEl.textContent = 'Película sin ID de TMDB configurado.';
+    document.getElementById('modal-original-title').textContent = movie.titulo;
+    document.getElementById('modal-genres').textContent = 'No disponibles';
     posterEl.src = 'https://via.placeholder.com/170x250?text=Sin+TMDB+ID';
   }
+}
+
+function renderModalGenres(genres) {
+  const container = document.getElementById('modal-genres');
+  container.replaceChildren();
+  if (!Array.isArray(genres) || genres.length === 0) {
+    container.textContent = 'No disponibles';
+    return;
+  }
+
+  genres.forEach(genre => {
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = genre.name;
+    container.appendChild(tag);
+  });
 }
